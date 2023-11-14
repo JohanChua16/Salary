@@ -1,0 +1,228 @@
+---
+title: "Evaluating Which Factors Best Predict Faculty Salary Through Multiple Regression Modelling"
+author: "Johan Chua"
+date: "06/08/23"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: 3
+  html_document:
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+    code_folding: show
+---
+
+```{r setup, include = FALSE, message = FALSE, warning = FALSE}
+library(tidyverse)
+library(leaps)
+library(knitr)
+salary_original <- read_csv("salary.csv")
+```
+
+\newpage
+
+# Introduction
+This paper aims to derive a multiple linear regression model that can quantify which factors have a significant effect on faculty salaries. The data was taken from a study conducted at the University of California, Berkeley, to investigate issues concerning salary equity among faculty.
+
+# Data Analysis
+
+## Main Effects Model
+
+We first create a model using all the meaningful variables provided in the dataset in order to explain faculty salaries. 
+
+```{r, message = FALSE, echo = FALSE}
+salary <- salary_original %>% # remove ID
+  mutate(DeptCodeFactor=factor(DeptCode)) %>% 
+  select(Gender:StartYr, DeptCodeFactor, Begin.Salary:Rank)
+
+mfull <- lm(Salary~., data = salary) # option 1 
+mlog <- lm(log(Salary)~., data = salary) # option 2
+```
+
+```{r, echo = FALSE}
+kable(summary(mfull)$coefficients)
+```
+
+\begin{center}
+Table 1: Summary of Model 1 Predictors
+\end{center}
+
+Only including statistically significant estimates (0.05 significance level), our inital model is: 
+
+$Salary = 3344000 - 1683*StartYr - 1,014*DeptCodeFactor2 - 1020*DeptCodeFactor4 - 1587DeptCodeFactor5 + 1.361*Begin.Salary - 1385*RankAsstProf + 2901*RankProfessr$
+
+### Model Validity
+```{r, out.width="50%", echo = FALSE}
+plot(mfull) # model in (a)
+```
+
+\begin{center}
+Figure 1: Model 1 (No Transformation) Diagnostic Plots
+\end{center}
+
+```{r, out.width="50%", echo = FALSE}
+plot(mlog) # log model I compared (a) with
+```
+
+\begin{center}
+Figure 2: Model 2 (Log Transformation) Diagnostic Plots
+\end{center}
+
+```{r, out.width="50%", echo = FALSE}
+car::mmp(mfull, salary$StartYr)
+car::mmp(mfull, salary$Begin.Salary)
+car::mmp(mfull, salary$Expernc)
+```
+
+\begin{center}
+Figure 3: MMP Plots for Model 1
+\end{center}
+
+\newpage
+
+I compared my original model with a log-transformed model (with the hopes it would reduce the effect of the outlier Point 4 and improve normality); however, it ended up producing relatively identical diagnostic plots as the orginal untransformed model, meaning it did not have any effect on model validity. Specifically, the log transform failed to change the relative position of Point 4 to the other points and barely improved normality on the Q-Q plot. Thus, I elected to stick with the original untransformed model stated in (a). 
+
+Based on the model's diagnostic and MMP plots, the model is valid.
+
+(1) Residuals vs Fitted: The residuals display no obvious pattern or trend, thus the model satistifes the linearity/structure condition. Additionally, the residuals are scattered randomly and evenly around the horizontal line residuals=0, therefore the model also satisfies the constant variance condition. It is worth noting that Point 4 is an outlier and thus doesn't take away from the model's validity.
+
+(2) Normal Q-Q: Overall, the residuals did not systematically stray from the dashed line, suggesting that the model satisfies the normality condition/the residuals follow a normal distribution. The only points that did not obey normality were Point 161 and Point 4. However, these two points (that were on opposite sides of the plot) weren't enough to consitute a noteworthy trend.
+
+(3) Scale-Location: There is no clear trend to the residuals (they are randomly scattered) which indicates that the model satisifies the constant variance condition.
+
+(4) Residuals vs Leverage: Using a high leverage cutoff of leverage > 0.1754386 and a high influence cutoffs of standardized residual < -4 or standardized residual > 4, we find that there are no bad leverage points.
+
+(5) MMP Plots: In all of the individual plots, we see that the red y_hat trend lines closely follow their respective blue loess lines. This means that the fitted model matches the trend for each individual predictor well. In other words, with respect to the trend, each of the variables are a good fit.
+
+### High Leverage/Influence Points & Collinearity
+
+```{r, out.width="80%", echo = FALSE}
+plot(mfull, which=5) # diagnostic plot
+```
+
+\begin{center}
+Figure 4: Residuals vs Leverage Plot for Model 1
+\end{center}
+
+\newpage
+
+```{r, out.width="70%", echo = FALSE}
+# high leverage, high influence
+kable(data.frame(High.Leverage = unname(which(hatvalues(mfull) > (2*(14+1))/nrow(salary))),
+                 High.Influence = unname(which(rstandard(mfull) > 4 | rstandard(mfull) < -4))))
+```
+
+\begin{center}
+Table 2: High Leverage and High Influence Residuals
+\end{center}
+
+```{r, out.width="70%", echo = FALSE}
+kable(car::vif(mfull)) # collinearity
+```
+
+
+\begin{center}
+Table 3: VIF for Model 1 Predictors
+\end{center}
+
+(1) High Leverage Points: These are defined by the criteria leverage > 0.1754386 (from $\frac{2({p+1})}{n}$). Points 5, 7, 20, 22 and 143 are high leverage. 
+
+(2) High Influence Points: These are defined by the criteria standardized residual < -4 or standardized residual > 4 for large data sets. Point 4 is high influence as it's standardized residual is 6+.
+
+(3) Bad Leverage Points: Since none of the high leverage points are high influence, there are no bad leverage points.
+
+(4) Collinearity: These are variables with a high GVIF ($GVIF^{\frac{1}{2df}} > 2.2$). StartYr and Begin.Salary are both highly correlated with other parameters in the model. 
+
+\newpage
+
+## Forwards and Backwards Stepwise Regression
+
+```{r, out.width="70%", echo = FALSE}
+fwd <- leaps::regsubsets(Salary~., data = salary, nvmax = 14, method = "forward")
+plot(1:14, summary(fwd)$bic)
+lines(1:14, summary(fwd)$bic)
+```
+
+\begin{center}
+Figure 5: BIC for Forwards Stepwise Regression
+\end{center}
+
+```{r, out.width="70%", echo = FALSE}
+bwd <- leaps::regsubsets(Salary~., data = salary, nvmax = 14, method = "backward")
+plot(1:14, summary(bwd)$bic)
+lines(1:14, summary(bwd)$bic)
+```
+
+\begin{center}
+Figure 6: BIC for Backwards Stepwise Regression
+\end{center}
+
+```{r, echo = FALSE}
+mfinal <- lm(Salary~StartYr+DeptCodeFactor+Begin.Salary+Rank, data = salary)
+kable(summary(mfinal)$coefficients)
+```
+
+\begin{center}
+Table 4: Summary of Final Model Predictors
+\end{center}
+
+Both models produced the same set of best model for each number of variables. Both the forward and backwards stepwise regressions report that the model with the lowest BIC (a goodness of fit criteria that rewards the addition of successful fitting variables while punishing model complexity) was the model with 4 variables. 
+
+Thus, using the BIC goodness of fit criterion, the best model with the lowest BIC was the model containing the variables StartYr, DeptCodeFactor, Begin.Salary and Rank:
+
+$Salary = 3479000 - 1752*StartYr -1047*DeptCodeFactor2-890.9*DeptCodeFactor3- 1199*DeptCodeFactor4- 1529*DeptCodeFactor5 + 1.485*Begin.Salary - 1493*RankAsstProf - 2252*RankInstruct + 2905*RankProfessr$
+
+# Conclusion
+
+## Department with Highest Salaries
+From the model (Table 4), the only DeptCodeFactor parameters that are statistically significant (at a 0.05 significance level) are DeptCodeFactor2, DeptCodeFactor3, DeptCodeFactor4 and DeptCodeFactor5. Since all those parameters have negative estimates, we can conclude that they have, on average, lower salaries than the baseline department, Dept 1. For the other departments (6, 7 and 8), whose estimates were not statistically significant, we can conclude that it is not unlikely for their estimates to be zero, and thus we can say they have the same mean salaries as Dept 1. 
+
+Thus, there are two tiers of salaries. Departments 1, 6, 7, 8 have roughly the same average salaries (tied for highest of the departments according to the model); and Departments 3, 2, 4 and 5 have the lowest salaries (in descending order/with department 5 having the lowest mean salaries of all departments).
+
+## Most Important Prediction Factors
+From the model (Table 4), since all of the parameters are statistically significant in this model, all of the factors included in this model are important: Start Yr, DeptCodeFactor, Begin.Salary, and Rank. Additionally, it is important to note that since 4 out of 7 parameters within the DeptCodeFactor variable were statistically significant, we deem that the DeptCodeFactor variable as a whole is significant and can be considered an important factor in determining salary.
+
+## Predicting Average Salary Per Faculty Rank
+```{r, echo = FALSE}
+kable(predict(mfinal, data.frame(StartYr = 1972, DeptCodeFactor = "8", Begin.Salary = 11289, 
+                           Rank = "Professr"), interval = 'confidence', level = 0.95))
+
+```
+
+\begin{center}
+Table 5: Confidence Interval for Professor
+\end{center}
+
+```{r, echo = FALSE}
+kable(predict(mfinal, data.frame(StartYr = 1972, DeptCodeFactor = "8", Begin.Salary = 11289, 
+                           Rank = "AsstProf"), interval = 'confidence', level = 0.95))
+
+```
+
+\begin{center}
+Table 6: Confidence Interval for Assistant Professor
+\end{center}
+
+The average faculty in this data set started in 1972, works in Dept 8, had a beginning salary of $11289, had 5.243 years of experience, and was a male. Using our final model, we calculate a 95% confidence interval for an average faculty who has rank "Professor" and for "Assistant Professor".
+
+We find that
+
+ - 95% Confidence Interval for Professor: (42166.03, 43450.6)
+
+ - 95% Confidence Interval for Assistant Professor: (37092.06, 39728.5)
+
+# Appendix
+
+## Summary Output for Forwards and Backwards Stepwise Regression
+```{r}
+# forward stepwise regression
+which(summary(fwd)$bic == min(summary(fwd)$bic))
+summary(fwd)
+
+# backward stepwise regresion
+which(summary(bwd)$bic == min(summary(bwd)$bic))
+summary(bwd)
+```
+
+
